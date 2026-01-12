@@ -1,0 +1,9 @@
+# name: quantum-env
+# dependencies:
+#   - python=3.10
+#   - pip
+#   - pip:
+#       - qiskit
+#       - pennylane
+#       - numpy
+#       - matplotlib
