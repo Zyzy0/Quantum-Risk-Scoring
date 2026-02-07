@@ -36,7 +36,7 @@ def main():
 
     # Zwiększamy zakres treningowy dla lepszych wyników (np. 100 próbek)
     batch_size = 32
-    epochs = 10
+    epochs = 100
 
     print(f"Rozpoczynam uczenie: {epochs} epok, batch size: {batch_size}...")
 
