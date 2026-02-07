@@ -47,6 +47,7 @@ pip install -r .\requirements.txt
 * Generate data: 
 ```Bash
 python data_processing.py
+python data_scaling_labeling.py
 ```
 * Train model:
 ```Bash
