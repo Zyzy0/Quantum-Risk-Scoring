@@ -7,8 +7,6 @@ from sklearn.decomposition import PCA
 def prepare_quantum_data(file_path, n_components=4):
     df = pd.read_csv(file_path, index_col=0)
 
-    # Zakładamy, że ostatnia kolumna to Target (ryzyko 0-3)
-    # Jeśli jeszcze nie masz etykiet, musisz je wygenerować w preprocessingu
     if 'Target' not in df.columns:
         # Przykładowe generowanie etykiet na podstawie zmienności, jeśli ich brak
         vol_col = [c for c in df.columns if 'Volat' in c][0]

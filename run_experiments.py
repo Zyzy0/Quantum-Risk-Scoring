@@ -35,7 +35,6 @@ def main():
     weights = q_model.weights
 
     # Zwiększamy zakres treningowy dla lepszych wyników (np. 100 próbek)
-    # Uwaga: symulacja kwantowa jest wolna, dostosuj wielkość batcha do sprzętu
     batch_size = 32
     epochs = 10
 

@@ -2,14 +2,13 @@ import pennylane as qml
 from pennylane import numpy as np
 
 
-class QuantumRiskModel:  # <--- To musi tu być!
+class QuantumRiskModel:
     def __init__(self, n_qubits=4, n_layers=2):
         self.n_qubits = n_qubits
         self.dev = qml.device("default.qubit", wires=n_qubits)
         # Inicjalizacja wag dla warstw StronglyEntanglingLayers
         self.weights = 0.01 * np.random.randn(n_layers, n_qubits, 3, requires_grad=True)
 
-        # Definicja QNode wewnątrz init lub jako metoda
         @qml.qnode(self.dev)
         def circuit(weights, data):
             qml.AngleEmbedding(data, wires=range(self.n_qubits))
