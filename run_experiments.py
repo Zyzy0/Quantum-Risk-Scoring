@@ -30,9 +30,9 @@ def main():
 
     # 3. Konfiguracja i Trening Modelu Kwantowego
     print("\n--- KROK 3: Trenowanie modelu kwantowego (VQC) ---")
-    q_model = QuantumRiskModel(n_qubits=4, n_layers=3)
-    opt = qml.AdamOptimizer(stepsize=0.05)  # Mniejszy krok dla lepszej stabilności
-    weights = q_model.weights
+    q_model = QuantumRiskModel(n_qubits=4, n_layers=4)
+    opt = qml.AdamOptimizer(stepsize=0.02)  # Mniejszy krok dla lepszej stabilności
+    params = (q_model.weights, q_model.bias)
 
     # Zwiększamy zakres treningowy dla lepszych wyników (np. 100 próbek)
     batch_size = 32
@@ -47,31 +47,36 @@ def main():
         y_batch = y_train[indices]
 
         # Aktualizacja wag
-        weights = opt.step(lambda w: q_model.cost(w, X_batch, y_batch), weights)
+        params = opt.step(lambda p: q_model.cost(p, X_batch, y_batch), params)
 
-        current_loss = q_model.cost(weights, X_batch, y_batch)
-        print(f"Epoka {epoch + 1}/{epochs} | Loss: {current_loss:.4f}")
+        current_loss = q_model.cost(params, X_batch, y_batch)
+        if (epoch + 1) % 5 == 0 or epoch == 0:
+            print(f"Epoka {epoch + 1}/{epochs} | Loss: {current_loss:.4f}")
+
+    # Wyodrębnienie wytrenowanych parametrów
+    trained_weights, trained_bias = params
 
     # 4. Ewaluacja i czyszczenie wyników
     print("\n--- KROK 4: Ewaluacja wyników kwantowych ---")
     test_size = 50  # Sprawdzamy na 50 próbkach testowych
 
     # Przewidywanie
-    q_raw_preds = [q_model.predict(weights, x) for x in X_test[:test_size]]
-    q_preds = [int(p) for p in q_raw_preds]
+    q_preds = [int(q_model.predict(trained_weights, trained_bias, x)) for x in X_test[:test_size]]
     actuals = [int(a) for a in y_test[:test_size]]
-
-    print("\nPorównanie (pierwsze 20 próbek):")
-    print(f"Predykcje Modelu: {q_preds[:20]}")
-    print(f"Wartości Realne:  {actuals[:20]}")
 
     # 5. Prosty raport końcowy
     print("\n--- RAPORT KOŃCOWY ---")
-    print(classification_report(actuals, q_preds, target_names=['Low', 'Medium', 'High', 'Very High'],
-                                labels=[0, 1, 2, 3]))
+    print(classification_report(actuals, q_preds,
+                                target_names=['Low', 'Medium', 'High', 'Very High'],
+                                labels=[0, 1, 2, 3],
+                                zero_division=0))
 
     # Zapisz wagi do pliku .npy
-    np.save('data/quantum_weights.npy', weights)
+    quantum_payload = {
+        'weights': trained_weights,
+        'bias': trained_bias
+    }
+    np.save('data/quantum_weights.npy', quantum_payload, allow_pickle=True)
     print("Wagi modelu zostały zapisane w data/quantum_weights.npy")
 
 
