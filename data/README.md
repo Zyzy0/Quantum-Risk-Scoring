@@ -1,49 +1,48 @@
-# Project Pipeline: Step-by-Step
-## Phase 1: Data Acquisition
+# 📊 Data Pipeline & Machine Learning Methodology
 
-- Source: Yahoo Finance (via yfinance library).
-- Assets: Top 100 market tickers + S&P 500 (^GSPC) as a market benchmark.
-- Period: Last 5 years of daily OHLCV (Open, High, Low, Close, Volume) data.
-- Caching: Implemented a check-sum system to skip downloads if raw data already exists locally.
+This directory handles the end-to-end data processing for the **Quantum Risk Scoring** project. The pipeline transforms raw historical market data into a machine-learning-ready dataset used to predict investment risk.
 
-## Phase 2: Feature Engineering
+## 🔄 Pipeline Overview
 
-Calculated 701 technical and relative features to provide the model with market context:
+1.  **Data Collection** (`data_processing.py`):
+    *   Downloads 5 years of daily history for ~100 top companies (Apple, Microsoft, Tesla, etc.) + S&P 500 Index.
+    *   Source: Yahoo Finance via `yfinance`.
+    *   Output: `historical_market_data.csv` (Raw OHLCV data).
 
-- Log Returns: Logarithmic transformation of price changes for statistical stability.
-- Momentum (RSI): Relative Strength Index to identify overbought/oversold conditions.
-- Volatility: Rolling 20-day standard deviation to measure historical risk.
-- Trend (SMA Ratio): Distance from the 20-day moving average to identify trend deviations.
-- Market Context: Relative returns (Alpha) and 60-day correlation (Beta) against the S&P 500.
+2.  **Feature Engineering** (`data_processing.py`):
+    *   Calculates technical indicators focusing on **Medium-Term (Quarterly) Trends**:
+        *   **`Volat_90d`**: 3-month Rolling Volatility (Crucial for risk).
+        *   **`Return_90d`**: 3-month Cumulative Return.
+        *   **`Drawdown_90d`**: Maximum loss from peak in the last quarter (Crash detection).
+        *   **`SMA_50_Ratio`**: Price relative to 50-day Moving Average (Trend strength).
+        *   **`Bollinger_Width`**: Volatility compression indicator.
+    *   Output: `features_ml_data.csv` (Wide format).
 
-## Phase 3: Preprocessing & Labeling
+3.  **Data Transformation & Labeling** (`data_scaling_labeling.py`):
+    *   **Reshaping**: Converts "Wide" data (one row per day, columns for all tickers) to "Long" format (one row per Ticker-Day).
+    *   **Scaling**: Standardizes features using `StandardScaler` (Mean=0, Std=1).
+    *   **Labeling (The Target)**:
+        *   We predict **Future Volatility** over the NEXT 21 days (1 month).
+        *   **Classes**:
+            *   🟢 **Low Risk**: Bottom 25% of volatility.
+            *   🟡 **Medium Risk**: 25-50% percentile.
+            *   🟠 **High Risk**: 50-75% percentile.
+            *   🔴 **Very High Risk**: Top 25% (Extreme volatility).
+    *   Output: `final_ml_dataset.csv` (Ready for training).
 
-- Scaling: Applied StandardScaler to normalize features (Mean=0, Std=1), ensuring features like RSI (0-100) and Log Returns (-0.05 to 0.05) are treated equally by the model.
+## 🧠 Model Methodology (`src/random_forest_model.py`)
 
-- Risk Labeling: Created a 4-tier classification target based on Future Realized Volatility (21-day forward-looking window):
+We use a **Global Random Forest Classifier** trained on all companies simultaneously.
 
-        0: Low Risk
+*   **Algorithm**: Random Forest (Ensemble of Decision Trees).
+*   **Validation Strategy**: **Temporal Split**.
+    *   We train on data from 2020-2023.
+    *   We test on the "future" (2024-2025).
+    *   *Why?* Standard random splitting would cause "data leakage" in financial time series.
+*   **Hyperparameter Tuning**:
+    *   Model parameters were optimized using `GridSearchCV`.
+    *   **Class Balancing**: Weights are adjusted to pay more attention to "High Risk" events.
 
-        1: Medium Risk
+## 📈 Key Findings
 
-        2: High Risk
-
-        3: Very High Risk
-
-- Quantile Balancing: Used quantiles to ensure an even distribution of classes (25% per class) to prevent model bias.
-
-## Future ML Steps (TODO List)
-
-    [ ] Chronological Train/Test Split: Divide data into training (e.g., 2021–2024) and testing (2025) sets. Crucial: Do not use random shuffle to avoid look-ahead bias.
-
-    [ ] Feature Selection / Dimensionality Reduction: * Evaluate feature importance using a Random Forest/XGBoost
-
-    [ ] Apply PCA (Principal Component Analysis) to reduce 701 features to 4–8 components for Quantum Circuit compatibility.
-
-    [ ] Classical Baseline Model: Train an XGBoost or Random Forest Classifier to establish a benchmark for accuracy and F1-Score.
-
-    [ ] Quantum Circuit Implementation: * Develop a Variational Quantum Classifier (VQC) using PennyLane.
-
-    [ ]Implement Angle Embedding to map classical components to Qubits.
-
-    [ ] Risk Scoring Dashboard: Visualize the predicted risk levels for the upcoming month for the entire portfolio.
+The model identified that **Quarterly Volatility (`Volat_90d`)** is the single most important predictor of future risk (41% importance), far outweighing short-term daily fluctuations. This confirms that for medium-term investing, looking at the 3-month trend is more valuable than yesterday's price change.

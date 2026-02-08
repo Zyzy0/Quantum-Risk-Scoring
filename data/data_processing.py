@@ -57,9 +57,37 @@ def data_preparing():
 
             log_return = np.log(close / close.shift(1))
             temp[f'{ticker}_Log_Return'] = log_return
+            
+            # --- Technical Indicators (Classic) ---
             temp[f'{ticker}_RSI'] = calculate_rsi(close)
             temp[f'{ticker}_Volat_20d'] = log_return.rolling(window=20).std()
             temp[f'{ticker}_SMA_20_Ratio'] = close / close.rolling(window=20).mean()
+            
+            # --- Advanced / Quarterly Indicators ---
+            # 1. Medium Term Trend (50 days ~ 2.5 months)
+            temp[f'{ticker}_SMA_50_Ratio'] = close / close.rolling(window=50).mean()
+            
+            # 2. Quarterly Performance (90 days)
+            # Log return sum over 60 trading days (~3 months)
+            temp[f'{ticker}_Return_90d'] = log_return.rolling(window=60).sum()
+            temp[f'{ticker}_Volat_90d'] = log_return.rolling(window=60).std()
+            
+            # 3. Max Drawdown (Quarterly) - How much did it drop from peak in last quarter?
+            roll_max = close.rolling(window=60).max()
+            temp[f'{ticker}_Drawdown_90d'] = (close / roll_max) - 1.0
+            
+            # 4. Bollinger Bands (20 days, 2 std dev)
+            sma_20 = close.rolling(window=20).mean()
+            std_20 = close.rolling(window=20).std()
+            upper_band = sma_20 + (std_20 * 2)
+            lower_band = sma_20 - (std_20 * 2)
+            
+            # %B Indicator: Where is price relative to bands? (0 = lower, 1 = upper)
+            temp[f'{ticker}_Bollinger_Pct'] = (close - lower_band) / (upper_band - lower_band + 1e-9)
+            
+            # Band Width (Volatility measure)
+            temp[f'{ticker}_Bollinger_Width'] = (upper_band - lower_band) / sma_20
+
             temp[f'{ticker}_Vol_Change'] = volume.pct_change()
             temp[f'{ticker}_Rel_Return'] = log_return - market_log_return
             temp[f'{ticker}_Market_Corr'] = log_return.rolling(window=60).corr(market_log_return)
