@@ -53,4 +53,4 @@ python data_scaling_labeling.py
 ```Bash
 python run_experiments.py
 ```
-* View Dashboard: Open notebooks/04_results.ipynb
+* View Dashboard: Open results.ipynb
