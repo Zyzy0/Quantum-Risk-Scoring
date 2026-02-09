@@ -1,84 +1,84 @@
 import sys
 import os
-from sklearn.metrics import classification_report
+from sklearn.metrics import classification_report, accuracy_score
+import pennylane as qml
+from pennylane import numpy as np
 
-# Dodanie bieżącej ścieżki do sys.path, aby uniknąć błędów importu
+# Adjust path to include project root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '.')))
 
 from src.utils import prepare_quantum_data
 from src.quantum_model import QuantumRiskModel
-from src.classical_baseline import run_classical_baseline
-import pennylane as qml
-from pennylane import numpy as np
-
 
 def main():
-    # 1. Załadowanie i przygotowanie danych
-    print("--- KROK 1: Przygotowywanie danych ---")
+    print("--- STEP 1: Data Preparation (8 Components) ---")
     file_path = 'data/features_ml_data.csv'
+    X_train, X_test, y_train, y_test = prepare_quantum_data(file_path, n_components=8)
+    print(f"Train set: {X_train.shape} | Test set: {X_test.shape}")
 
-    try:
-        X_train, X_test, y_train, y_test = prepare_quantum_data(file_path, n_components=4)
-        print(f"Dane załadowane. Rozmiar treningowy: {X_train.shape}, Testowy: {X_test.shape}")
-    except FileNotFoundError as e:
-        print(e)
-        return
+    print("\n--- STEP 2: Training with Model Checkpoint ---")
+    q_model = QuantumRiskModel(n_qubits=8, n_layers=3)
+    params = q_model.weights
 
-    # 2. Uruchomienie modelu klasycznego (Benchmark)
-    print("\n--- KROK 2: Uruchamianie Baseline (XGBoost) ---")
-    run_classical_baseline(X_train, X_test, y_train, y_test)
-
-    # 3. Konfiguracja i Trening Modelu Kwantowego
-    print("\n--- KROK 3: Trenowanie modelu kwantowego (VQC) ---")
-    q_model = QuantumRiskModel(n_qubits=4, n_layers=4)
-    opt = qml.AdamOptimizer(stepsize=0.02)  # Mniejszy krok dla lepszej stabilności
-    params = (q_model.weights, q_model.bias)
-
-    # Zwiększamy zakres treningowy dla lepszych wyników (np. 100 próbek)
+    # Using a smaller learning rate for stability
+    opt = qml.AdamOptimizer(stepsize=0.02)
     batch_size = 32
-    epochs = 100
+    epochs = 60
 
-    print(f"Rozpoczynam uczenie: {epochs} epok, batch size: {batch_size}...")
+    # Best model tracking
+    best_acc = 0.0
+    best_weights = params
+    best_epoch = 0
+
+    print(f"Starting: {epochs} epochs...")
 
     for epoch in range(epochs):
-        # Wybieramy losowy batch dla każdej epoki (Mini-batch GD)
-        indices = np.random.choice(len(X_train), batch_size, replace=False)
-        X_batch = X_train[indices]
-        y_batch = y_train[indices]
+        # Shuffle training data
+        perm = np.random.permutation(len(X_train))
+        X_train = X_train[perm]
+        y_train = y_train[perm]
 
-        # Aktualizacja wag
-        params = opt.step(lambda p: q_model.cost(p, X_batch, y_batch), params)
+        batch_losses = []
+        for i in range(0, len(X_train), batch_size):
+            X_batch = X_train[i: i + batch_size]
+            y_batch = y_train[i: i + batch_size]
 
-        current_loss = q_model.cost(params, X_batch, y_batch)
-        if (epoch + 1) % 5 == 0 or epoch == 0:
-            print(f"Epoka {epoch + 1}/{epochs} | Loss: {current_loss:.4f}")
+            params, loss = opt.step_and_cost(lambda w: q_model.cost(w, X_batch, y_batch), params)
+            batch_losses.append(loss)
 
-    # Wyodrębnienie wytrenowanych parametrów
-    trained_weights, trained_bias = params
+        avg_loss = np.mean(batch_losses)
 
-    # 4. Ewaluacja i czyszczenie wyników
-    print("\n--- KROK 4: Ewaluacja wyników kwantowych ---")
-    test_size = 50  # Sprawdzamy na 50 próbkach testowych
+        # Validation per epoch
+        val_sample_size = min(100, len(X_test))
+        test_indices = np.random.choice(len(X_test), val_sample_size, replace=False)
+        preds = [q_model.predict(params, None, X_test[i]) for i in test_indices]
+        current_acc = accuracy_score(y_test[test_indices], preds)
 
-    # Przewidywanie
-    q_preds = [int(q_model.predict(trained_weights, trained_bias, x)) for x in X_test[:test_size]]
-    actuals = [int(a) for a in y_test[:test_size]]
+        # Checkpoint mechanism
+        if current_acc > best_acc:
+            best_acc = current_acc
+            best_weights = params.copy()
+            best_epoch = epoch + 1
+            print(f"Epoch {epoch + 1:03d} | Loss: {avg_loss:.4f} | Acc: {current_acc:.2%} (*) NEW BEST")
+        else:
+            if (epoch + 1) % 5 == 0:
+                print(f"Epoch {epoch + 1:03d} | Loss: {avg_loss:.4f} | Acc: {current_acc:.2%}")
 
-    # 5. Prosty raport końcowy
-    print("\n--- RAPORT KOŃCOWY ---")
-    print(classification_report(actuals, q_preds,
-                                target_names=['Low', 'Medium', 'High', 'Very High'],
-                                labels=[0, 1, 2, 3],
-                                zero_division=0))
+    print(f"\n--- Training Complete ---")
+    print(f"Loading weights from Epoch {best_epoch} (Best Acc: {best_acc:.2%})")
 
-    # Zapisz wagi do pliku .npy
-    quantum_payload = {
-        'weights': trained_weights,
-        'bias': trained_bias
-    }
+    # Save the best parameters
+    quantum_payload = {'weights': best_weights, 'bias': 0}
     np.save('data/quantum_weights.npy', quantum_payload, allow_pickle=True)
-    print("Wagi modelu zostały zapisane w data/quantum_weights.npy")
+    print("Best weights saved successfully.")
 
+    print("\n--- Final Classification Report (Best Model) ---")
+    # Evaluate on a larger test subset
+    test_limit = 300
+    final_preds = [q_model.predict(best_weights, None, x) for x in X_test[:test_limit]]
+    print(classification_report(y_test[:test_limit], final_preds,
+                                target_names=['Low', 'Med', 'High', 'V.High'],
+                                zero_division=0))
 
 if __name__ == "__main__":
     main()
