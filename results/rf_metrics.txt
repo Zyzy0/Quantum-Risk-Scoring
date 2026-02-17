@@ -1,0 +1,29 @@
+RF Model Accuracy: 0.3875
+
+Classification Report:
+              precision    recall  f1-score   support
+
+           0       0.43      0.50      0.46      5178
+           1       0.30      0.26      0.28      6151
+           2       0.29      0.32      0.31      5908
+           3       0.54      0.48      0.51      6363
+
+    accuracy                           0.39     23600
+   macro avg       0.39      0.39      0.39     23600
+weighted avg       0.39      0.39      0.39     23600
+
+Feature Importances:
+Volat_90d: 0.4118
+Volat_20d: 0.1979
+Drawdown_90d: 0.0762
+Bollinger_Width: 0.0760
+Market_Corr: 0.0621
+Return_90d: 0.0499
+SMA_50_Ratio: 0.0413
+SMA_20_Ratio: 0.0201
+RSI: 0.0193
+Bollinger_Pct: 0.0130
+Log_Return: 0.0106
+Rel_Return: 0.0082
+MARKET_Log_Return: 0.0076
+Vol_Change: 0.0060

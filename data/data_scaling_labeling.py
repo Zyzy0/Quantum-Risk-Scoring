@@ -9,33 +9,35 @@ def create_risk_labels(df, tickers, horizon=21):
     """
     print(f"Creating labels for a {horizon}-day investment horizon...")
     
-    # We will store the future volatility for each ticker here
-    future_vols = pd.DataFrame(index=df.index)
+    future_vols_list = []
 
+    # Iterate over all tickers to calculate future volatility
     for ticker in tickers:
-        # Calculate future volatility (std dev of returns for the NEXT month)
-        # We shift(-horizon) to align today's features with next month's volatility
         log_return_col = f'{ticker}_Log_Return'
         if log_return_col in df.columns:
+            # Shift backwards to align today's row with NEXT month's volatility
             future_vol = df[log_return_col].rolling(window=horizon).std().shift(-horizon)
-            future_vols[f'{ticker}_Future_Vol'] = future_vol
+            
+            # Store temporarily
+            temp_df = pd.DataFrame(index=df.index)
+            temp_df['Future_Vol'] = future_vol
+            temp_df['Ticker'] = ticker
+            future_vols_list.append(temp_df)
 
-    # For simplicity, we can calculate a median risk across all stocks or do it per-stock.
-    # Most ML models for stocks are trained on "stacked" data (long format).
-    # Let's create a combined risk metric to define what "High Risk" means in this market.
-    all_future_vols = future_vols.values.flatten()
-    all_future_vols = all_future_vols[~np.isnan(all_future_vols)] # remove NaNs
+    # Concatenate all (this is just for threshold calculation globally)
+    # We want global thresholds to ensure "High Risk" means the same thing for AAPL as for TSLA
+    all_future_vols = pd.concat(future_vols_list)['Future_Vol']
+    all_future_vols = all_future_vols.dropna()
     
     # Define thresholds based on quantiles (25%, 50%, 75%)
     thresholds = np.quantile(all_future_vols, [0.25, 0.5, 0.75])
     
-    print(f"Risk Thresholds (Volatility): Low < {thresholds[0]:.4f} < Medium < {thresholds[1]:.4f} < High < {thresholds[2]:.4f} < Very High")
+    print(f"Global Risk Thresholds (Volatility): Low < {thresholds[0]:.4f} < Medium < {thresholds[1]:.4f} < High < {thresholds[2]:.4f} < Very High")
     
-    return future_vols, thresholds
+    return thresholds
 
 def prepare_ml_ready_data():
     features_path = 'data/features_ml_data.csv'
-    raw_path = 'data/historical_market_data.csv'
     output_path = 'data/final_ml_dataset.csv'
 
     if not os.path.exists(features_path):
@@ -43,50 +45,107 @@ def prepare_ml_ready_data():
         return
 
     # 1. Load data
+    print("Loading feature data...")
     df = pd.read_csv(features_path, index_col=0)
-    # Extract original tickers from column names
-    tickers = list(set([col.split('_')[0] for col in df.columns if '_' in col and col != 'MARKET_Log_Return']))
-
-    # 2. Create Labels (The 'Y' variable)
-    # Target: Risk level for the next 21 days
-    future_vols, thresholds = create_risk_labels(df, tickers)
     
-    # 3. Scaling Features (The 'X' variables)
-    print("Scaling features using StandardScaler...")
+    # Extract original tickers by looking at columns ending in '_Log_Return'
+    # (filtering out MARKET which is special)
+    tickers = list(set([col.split('_')[0] for col in df.columns if '_Log_Return' in col and 'MARKET' not in col]))
+    print(f"Found {len(tickers)} tickers to process.")
+
+    # 2. Establish Global Risk Thresholds
+    thresholds = create_risk_labels(df, tickers)
+
+    # 3. Transform to Long Format (Stacked)
+    # We want a DataFrame with columns: [Date, Ticker, RSI, Log_Return, Volat_20d, ..., MARKET_Log_Return, TARGET]
+    print("re-shaping data to Long Format (this may take a moment)...")
+    
+    master_data = []
+
+    # Common features that apply to all stocks (Market data)
+    market_col = 'MARKET_Log_Return'
+    market_data = df[market_col]
+
+    for ticker in tickers:
+        # Identify columns for this specific ticker
+        # Expected: {ticker}_Log_Return, {ticker}_RSI, {ticker}_Volat_20d, etc.
+        # We rename them to generic names: Log_Return, RSI, Volat_20d...
+        
+        # Helper to safely get series
+        def get_col(suffix):
+            col_name = f"{ticker}_{suffix}"
+            return df[col_name] if col_name in df.columns else None
+
+        # Prepare a slice for this ticker
+        ticker_df = pd.DataFrame(index=df.index)
+        ticker_df['Date'] = df.index
+        ticker_df['Ticker'] = ticker
+        
+        # Features
+        ticker_df['Log_Return'] = get_col('Log_Return')
+        ticker_df['RSI'] = get_col('RSI')
+        ticker_df['Volat_20d'] = get_col('Volat_20d')
+        ticker_df['SMA_20_Ratio'] = get_col('SMA_20_Ratio')
+        ticker_df['Vol_Change'] = get_col('Vol_Change')
+        ticker_df['Rel_Return'] = get_col('Rel_Return')
+        ticker_df['Market_Corr'] = get_col('Market_Corr')
+        
+        # --- New Advanced Features ---
+        ticker_df['SMA_50_Ratio'] = get_col('SMA_50_Ratio')
+        ticker_df['Return_90d'] = get_col('Return_90d')
+        ticker_df['Volat_90d'] = get_col('Volat_90d')
+        ticker_df['Drawdown_90d'] = get_col('Drawdown_90d')
+        ticker_df['Bollinger_Pct'] = get_col('Bollinger_Pct')
+        ticker_df['Bollinger_Width'] = get_col('Bollinger_Width')
+        
+        # Add Market Context
+        ticker_df['MARKET_Log_Return'] = market_data
+        
+        # Create Target (Future Volatility)
+        # Shift -21 days
+        ticker_df['TARGET_Future_Vol'] = ticker_df['Log_Return'].rolling(window=21).std().shift(-21)
+        
+        master_data.append(ticker_df)
+
+    # Combine all
+    full_df = pd.concat(master_data, ignore_index=True)
+    
+    # 4. Clean & Scale
+    print(f"Combined data shape before cleaning: {full_df.shape}")
+    
+    # Remove rows where Target is NaN (the last 21 days for each stock) or features are missing
+    full_df.dropna(inplace=True)
+    
+    print(f"Shape after dropping NaNs: {full_df.shape}")
+
+    # Scale specific Feature columns
+    # We do NOT scale 'Date', 'Ticker', 'TARGET_Future_Vol'
+    feature_cols = [
+        'Log_Return', 'RSI', 'Volat_20d', 'SMA_20_Ratio', 'Vol_Change', 'Rel_Return', 'Market_Corr',
+        'SMA_50_Ratio', 'Return_90d', 'Volat_90d', 'Drawdown_90d', 'Bollinger_Pct', 'Bollinger_Width',
+        'MARKET_Log_Return'
+    ]
+    
+    print("Scaling features...")
     scaler = StandardScaler()
-    
-    # We don't scale the index (Date), we scale the values
-    feature_cols = df.columns
-    df_scaled = pd.DataFrame(scaler.fit_transform(df), columns=feature_cols, index=df.index)
+    full_df[feature_cols] = scaler.fit_transform(full_df[feature_cols])
 
-    # 4. Final Dataset Construction
-    # Since predicting 100 different stocks at once is complex, 
-    # usually we pick one target stock OR create a model that predicts "Market Risk".
-    # Let's save the scaled features and the future volatility labels separately for now.
-    
-    # To keep it simple for your project: we add the future volatility of the FIRST ticker as a sample target
-    # In a real scenario, you'd probably reshape this to (samples * stocks, features)
-    target_ticker = tickers[0]
-    df_scaled['TARGET_Future_Vol'] = future_vols[f'{target_ticker}_Future_Vol']
-    
-    # Assign Risk Categories
+    # 5. Labeling
     def categorize_risk(vol):
-        if pd.isna(vol): return np.nan
         if vol <= thresholds[0]: return 0 # Low
         if vol <= thresholds[1]: return 1 # Medium
         if vol <= thresholds[2]: return 2 # High
         return 3 # Very High
 
-    df_scaled['TARGET_Risk_Level'] = df_scaled['TARGET_Future_Vol'].apply(categorize_risk)
+    full_df['TARGET_Risk_Level'] = full_df['TARGET_Future_Vol'].apply(categorize_risk)
 
-    # Drop rows where we don't have a target (the last 21 days of the dataset)
-    final_df = df_scaled.dropna(subset=['TARGET_Risk_Level'])
-
-    final_df = final_df.round(4)
-
-    final_df.to_csv(output_path)
-    print(f"Final ML Dataset saved to {output_path} with {final_df.shape[0]} samples.")
-    print(f"Target selected for demo: {target_ticker}")
+    # Save
+    full_df = full_df.round(4)
+    full_df.to_csv(output_path, index=False)
+    
+    print(f"Final Global ML Dataset saved to {output_path}")
+    print(f"Total Samples: {len(full_df)}")
+    print("Columns:", full_df.columns.tolist())
 
 if __name__ == "__main__":
     prepare_ml_ready_data()
